@@ -17,7 +17,7 @@ jobs:
       - name: Checkout your fork’s main
         uses: actions/checkout@v4
         with:
-          ref: master
+          ref: main
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0  # Fetch full history to avoid shallow clone issues
 
@@ -42,4 +42,5 @@ jobs:
       # Push the merge back to your fork’s main branch
       - name: Push merged result to your fork
         run: |
+
           git push origin main
