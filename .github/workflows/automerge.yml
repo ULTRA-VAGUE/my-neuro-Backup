@@ -26,7 +26,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-
       # ---- BRANCH MERGE ----
       - name: Add upstream remote and fetch
         run: |
@@ -41,87 +40,76 @@ jobs:
         run: |
           git push origin main
 
-
       # ---- TAG SYNC ----
       - name: Sync tags from upstream to fork
         run: |
           git fetch upstream --tags
           git push origin --tags
 
-
-      # ---- RELEASE + ASSET SYNC ----
+      # ---- RELEASE & ASSET SYNC (robust API version) ----
       - name: Sync releases and assets
         env:
-          GH_TOKEN: ${{ secrets.UPSTREAM_SYNC_PAT }}
+          TOKEN: ${{ secrets.UPSTREAM_SYNC_PAT }}
           REPO_FORK: ${{ github.repository }}
           REPO_UPSTREAM: "morettt/my-neuro"
         run: |
-          echo "⏬ Fetching releases from upstream…"
-          upstream_releases=$(gh api -H "Accept: application/vnd.github+json" \
-            /repos/$REPO_UPSTREAM/releases)
+          echo "Fetching upstream releases…"
 
-          for row in $(echo "${upstream_releases}" | jq -r '.[] | @base64'); do
-            _jq() { echo ${row} | base64 --decode | jq -r ${1}; }
+          # fetch releases from upstream
+          UPSTREAM=$(curl -s -H "Authorization: token $TOKEN" \
+            https://api.github.com/repos/$REPO_UPSTREAM/releases)
 
-            tag=$(_jq '.tag_name')
-            name=$(_jq '.name')
-            body=$(_jq '.body')
-            draft=$(_jq '.draft')
-            prerelease=$(_jq '.prerelease')
+          echo "$UPSTREAM" | jq -c '.[]' | while read rel; do
+            TAG=$(echo "$rel" | jq -r '.tag_name')
+            NAME=$(echo "$rel" | jq -r '.name')
+            BODY=$(echo "$rel" | jq -r '.body' | jq -Rs .)
+            DRAFT=$(echo "$rel" | jq -r '.draft')
+            PRERELEASE=$(echo "$rel" | jq -r '.prerelease')
 
-            echo "➡️ Sync release: $tag"
+            echo "➡️ Processing release $TAG"
 
-            # Check if release already exists in the fork
-            existing=$(gh api -H "Accept: application/vnd.github+json" \
-              /repos/$REPO_FORK/releases/tags/$tag 2>/dev/null || true)
+            # check if release exists in fork
+            EXISTING=$(curl -s -H "Authorization: token $TOKEN" \
+              https://api.github.com/repos/$REPO_FORK/releases/tags/$TAG)
 
-            if [[ -z "$existing" ]]; then
-              echo "🆕 Creating release $tag in fork…"
-              gh api --method POST -H "Accept: application/vnd.github+json" \
-                /repos/$REPO_FORK/releases \
-                -f tag_name="$tag" \
-                -f name="$name" \
-                -f body="$body" \
-                -F draft="$draft" \
-                -F prerelease="$prerelease" \
-                >/dev/null
+            if [[ "$(echo "$EXISTING" | jq -r '.id')" == "null" ]]; then
+              echo "🆕 Creating release $TAG in fork…"
+              FORK_RELEASE=$(curl -s -X POST \
+                -H "Authorization: token $TOKEN" \
+                -H "Content-Type: application/json" \
+                -d "{\"tag_name\":\"$TAG\",\"name\":\"$NAME\",\"body\":$BODY,\"draft\":$DRAFT,\"prerelease\":$PRERELEASE}" \
+                https://api.github.com/repos/$REPO_FORK/releases)
             else
-              echo "✔️ Release $tag already exists — updating metadata…"
-              release_id=$(echo "$existing" | jq -r '.id')
-              gh api --method PATCH -H "Accept: application/vnd.github+json" \
-                /repos/$REPO_FORK/releases/$release_id \
-                -f name="$name" \
-                -f body="$body" \
-                -F draft="$draft" \
-                -F prerelease="$prerelease" \
-                >/dev/null
+              echo "✔️ Updating release $TAG in fork…"
+              RELEASE_ID=$(echo "$EXISTING" | jq -r '.id')
+              FORK_RELEASE=$(curl -s -X PATCH \
+                -H "Authorization: token $TOKEN" \
+                -H "Content-Type: application/json" \
+                -d "{\"name\":\"$NAME\",\"body\":$BODY,\"draft\":$DRAFT,\"prerelease\":$PRERELEASE}" \
+                https://api.github.com/repos/$REPO_FORK/releases/$RELEASE_ID)
             fi
 
-            # Sync assets
-            echo "⬇️ Syncing assets for $tag…"
-            assets=$(_jq '.assets')
+            RELEASE_ID=$(echo "$FORK_RELEASE" | jq -r '.id')
 
-            for asset in $(echo "$assets" | jq -r '.[] | @base64'); do
-              _a() { echo ${asset} | base64 --decode | jq -r ${1}; }
+            echo "⬇️ Syncing assets for $TAG…"
+            echo "$rel" | jq -c '.assets[]?' | while read asset; do
+              ASSET_NAME=$(echo "$asset" | jq -r '.name')
+              ASSET_URL=$(echo "$asset" | jq -r '.url')
 
-              asset_name=$(_a '.name')
-              asset_url=$(_a '.url')
+              echo "   → Downloading $ASSET_NAME"
+              curl -L \
+                -H "Authorization: token $TOKEN" \
+                -H "Accept: application/octet-stream" \
+                "$ASSET_URL" -o "$ASSET_NAME"
 
-              echo "   ↳ Asset: $asset_name"
-
-              # Download asset from upstream release
-              curl -L -H "Accept: application/octet-stream" \
-                -H "Authorization: token $GH_TOKEN" \
-                "$asset_url" -o "$asset_name"
-
-              # Check if asset already exists in fork
-              fork_release=$(gh api /repos/$REPO_FORK/releases/tags/$tag)
-              fork_release_id=$(echo "$fork_release" | jq -r '.id')
-
-              # Upload the asset
-              gh release upload "$tag" "$asset_name" --repo "$REPO_FORK" --clobber
+              echo "   → Uploading $ASSET_NAME to fork release $TAG"
+              curl -s -X POST \
+                -H "Authorization: token $TOKEN" \
+                -H "Content-Type: application/octet-stream" \
+                --data-binary @"$ASSET_NAME" \
+                "https://uploads.github.com/repos/$REPO_FORK/releases/$RELEASE_ID/assets?name=$ASSET_NAME" \
+                >/dev/null
             done
-
           done
 
-          echo "🎉 Finished syncing releases and assets!"
+          echo "🎉 Release & asset sync complete!"
