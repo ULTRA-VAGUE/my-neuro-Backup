@@ -1,46 +1,127 @@
 name: Daily merge from upstream into main
+
 on:
   schedule:
-    # Runs daily at 08:00 UTC 
-    - cron: '0 8 * * *'
+    - cron: '0 8 * * *'  # daily at 08:00 UTC
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  merge-upstream:
+  sync-upstream:
     runs-on: ubuntu-latest
 
     steps:
-      # Checkout your fork's main branch with full history
-      - name: Checkout your fork’s main
+      # Checkout your fork's main branch
+      - name: Checkout your fork main
         uses: actions/checkout@v4
         with:
           ref: main
-          token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0  # Fetch full history to avoid shallow clone issues
+          fetch-depth: 0
 
-      # Set Git user details for commit/push
+      # Git config
       - name: Configure Git user
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      # Add upstream remote and fetch all history
+
+      # ---- BRANCH MERGE ----
       - name: Add upstream remote and fetch
         run: |
           git remote add upstream https://github.com/morettt/my-neuro.git
-          git fetch upstream --unshallow || true  # If repo is shallow, convert to full history
-          git fetch upstream
+          git fetch upstream --tags --prune
 
-      # Merge upstream/main into your main, allow unrelated histories, handle conflicts gracefully
       - name: Merge upstream/main into main
         run: |
           git merge upstream/main --allow-unrelated-histories --no-edit || echo "Merge conflict or no changes"
 
-      # Push the merge back to your fork’s main branch
-      - name: Push merged result to your fork
+      - name: Push merged main
         run: |
-
           git push origin main
+
+
+      # ---- TAG SYNC ----
+      - name: Sync tags from upstream to fork
+        run: |
+          git fetch upstream --tags
+          git push origin --tags
+
+
+      # ---- RELEASE + ASSET SYNC ----
+      - name: Sync releases and assets
+        env:
+          GH_TOKEN: ${{ secrets.UPSTREAM_SYNC_PAT }}
+          REPO_FORK: ${{ github.repository }}
+          REPO_UPSTREAM: "morettt/my-neuro"
+        run: |
+          echo "⏬ Fetching releases from upstream…"
+          upstream_releases=$(gh api -H "Accept: application/vnd.github+json" \
+            /repos/$REPO_UPSTREAM/releases)
+
+          for row in $(echo "${upstream_releases}" | jq -r '.[] | @base64'); do
+            _jq() { echo ${row} | base64 --decode | jq -r ${1}; }
+
+            tag=$(_jq '.tag_name')
+            name=$(_jq '.name')
+            body=$(_jq '.body')
+            draft=$(_jq '.draft')
+            prerelease=$(_jq '.prerelease')
+
+            echo "➡️ Sync release: $tag"
+
+            # Check if release already exists in the fork
+            existing=$(gh api -H "Accept: application/vnd.github+json" \
+              /repos/$REPO_FORK/releases/tags/$tag 2>/dev/null || true)
+
+            if [[ -z "$existing" ]]; then
+              echo "🆕 Creating release $tag in fork…"
+              gh api --method POST -H "Accept: application/vnd.github+json" \
+                /repos/$REPO_FORK/releases \
+                -f tag_name="$tag" \
+                -f name="$name" \
+                -f body="$body" \
+                -F draft="$draft" \
+                -F prerelease="$prerelease" \
+                >/dev/null
+            else
+              echo "✔️ Release $tag already exists — updating metadata…"
+              release_id=$(echo "$existing" | jq -r '.id')
+              gh api --method PATCH -H "Accept: application/vnd.github+json" \
+                /repos/$REPO_FORK/releases/$release_id \
+                -f name="$name" \
+                -f body="$body" \
+                -F draft="$draft" \
+                -F prerelease="$prerelease" \
+                >/dev/null
+            fi
+
+            # Sync assets
+            echo "⬇️ Syncing assets for $tag…"
+            assets=$(_jq '.assets')
+
+            for asset in $(echo "$assets" | jq -r '.[] | @base64'); do
+              _a() { echo ${asset} | base64 --decode | jq -r ${1}; }
+
+              asset_name=$(_a '.name')
+              asset_url=$(_a '.url')
+
+              echo "   ↳ Asset: $asset_name"
+
+              # Download asset from upstream release
+              curl -L -H "Accept: application/octet-stream" \
+                -H "Authorization: token $GH_TOKEN" \
+                "$asset_url" -o "$asset_name"
+
+              # Check if asset already exists in fork
+              fork_release=$(gh api /repos/$REPO_FORK/releases/tags/$tag)
+              fork_release_id=$(echo "$fork_release" | jq -r '.id')
+
+              # Upload the asset
+              gh release upload "$tag" "$asset_name" --repo "$REPO_FORK" --clobber
+            done
+
+          done
+
+          echo "🎉 Finished syncing releases and assets!"
