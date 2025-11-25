@@ -1,10 +1,10 @@
-# LLM训练配置
+# LLM Training Configuration
 
-# 模型相关配置
+# Model Configuration
 model:
-  path: ""  # 模型路径
-  use_lora: true  # 想要lora微调改为“true” 想要全参数微调改为false 这里默认是lora微调
-  # LoRA特定参数 (仅当use_lora为true时使用)
+  path: ""  # Model path
+  use_lora: true  # Set to "true" for LoRA fine-tuning, "false" for full-parameter fine-tuning (default: LoRA)
+  # LoRA-specific parameters (only used when use_lora is true)
   lora_target_modules: 
     - "q_proj"
     - "k_proj"
@@ -17,34 +17,34 @@ model:
   lora_alpha: 32
   lora_dropout: 0.05
 
-# 训练相关配置
+# Training Configuration
 training:
-  output_dir: "output"  # 输出目录
-  batch_size: 1  # 每设备批次大小
-  gradient_accumulation_steps: 16  # 梯度累积步数
+  output_dir: "output"  # Output directory
+  batch_size: 1  # Batch size per device
+  gradient_accumulation_steps: 16  # Gradient accumulation steps
   learning_rate: 1e-4
   warmup_steps: 50
   max_grad_norm: 1.0
-  epochs: 10  # 训练轮数
+  epochs: 10  # Number of training epochs
   logging_steps: 5
   save_steps: 10
-  save_total_limit: 3  # 保存的检查点数量
+  save_total_limit: 3  # Number of checkpoints to keep
   save_on_each_node: true
-  gradient_checkpointing: true  # 是否使用梯度检查点
-  bf16: true  # 是否使用bfloat16
-  fp16: false  # 是否使用float16
+  gradient_checkpointing: true  # Enable gradient checkpointing
+  bf16: true  # Use bfloat16 precision
+  fp16: false  # Use float16 precision
   remove_unused_columns: false
-  optimizer: "adamw_torch"  # 优化器
+  optimizer: "adamw_torch"  # Optimizer
   dataloader_pin_memory: true
   group_by_length: true
-  lr_scheduler_type: "cosine"  # 学习率调度器类型
+  lr_scheduler_type: "cosine"  # Learning rate scheduler type
   weight_decay: 0.01
-  max_steps: -1  # -1表示使用epochs
+  max_steps: -1  # -1 means use epochs instead
   save_strategy: "steps"
   save_safetensors: true
   overwrite_output_dir: true
 
-# 数据相关配置
+# Data Configuration
 data:
-  path: "./data/train.json"  # 训练数据路径
-  max_length: 4048  # 最大序列长度
+  path: "./data/train.json"  # Training data path
+  max_length: 4048  # Maximum sequence length
