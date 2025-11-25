@@ -1,7 +1,7 @@
 from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
 from threading import Thread
 
-model_name = "模型路径"
+model_name = "模型路径" # Model Path
 
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
@@ -15,7 +15,7 @@ messages = [
 
 def chat():
     while True:
-        user = input('你：')
+        user = input('you：')
         messages.append({"role": "user","content": user})
 
         text = tokenizer.apply_chat_template(
@@ -24,7 +24,7 @@ def chat():
             add_generation_prompt=True
         )
         model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
-        input_length = model_inputs.input_ids.shape[1]  # 记录输入长度
+        input_length = model_inputs.input_ids.shape[1]  # Record input length
 
         streamer = TextIteratorStreamer(tokenizer, skip_special_tokens=True, skip_prompt=True)
         generation_kwargs = dict(
@@ -41,7 +41,7 @@ def chat():
         for new_text in streamer:
             print(new_text, end="", flush=True)
             response += new_text
-        print()  # 换行
+        print()  # line break
         
         messages.append({"role": "assistant","content": response})
 
