@@ -1,10 +1,31 @@
-# 忽略 live-2d-develop 里的特定文件夹
-live-2d-develop/2D/
-live-2d-develop/AI记录室/
-live-2d-develop/GAME/
+# 忽略所有
+*
 
-# 忽略日志文件
-*.log
+# 不忽略 .gitignore 本身
+!.gitignore
 
-# 忽略压缩包
-*.7z
+# 不忽略 develop 文件夹
+!develop/
+!develop/**
+
+
+# 忽略 develop 里的特定文件夹
+develop/2D/*
+develop/AI记录室/
+develop/build/
+develop/fake_neuro_audio/
+develop/node/
+develop/node_modules/
+develop/song-library/
+
+# 不忽略 2D 文件夹特定文件
+!develop/2D/占位.txt
+
+
+# 忽略所有 node_modules（无论在哪）
+**/node_modules/
+
+# 忽略可执行文件
+*.exe
+*.zip
+
